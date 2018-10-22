@@ -12,9 +12,12 @@ import socket
 import re
 import configparser
 import os
+import traceback
+import inflect
 
 # SETTINGS
 
+p = inflect.engine()
 
 class var():
     infomessage = 'Twitch Trivia Bot loaded. Version 0.1.3. Developed by cleartonic.'
@@ -41,6 +44,8 @@ class var():
     trivia_questiondelay = 'INIT'
     # BONUS: How much points are worth in BONUS round
     trivia_bonusvalue = 'INIT'
+    trivia_num_answers = 1
+    trivia_answered_by = []
     admins = 'INIT'
 
     # FUNCTION VARIABLES
@@ -146,6 +151,7 @@ def loadconfig():
     var.trivia_questiondelay = int(
         config['Trivia Settings']['trivia_questiondelay'])
     var.trivia_bonusvalue = int(config['Trivia Settings']['trivia_bonusvalue'])
+    var.trivia_num_answers = int(config['Trivia Settings']['trivia_num_answers'])
 
     admin1 = config['Admin Settings']['admins']
     var.admins = admin1.split(',')
@@ -249,23 +255,44 @@ def trivia_callquestion():
           ": | ANSWER: "+var.qs.iloc[var.session_questionno, 2])
 
 
-def trivia_answer(username, cleanmessage):
-    var.trivia_questionasked = False
-    try:
-        var.userscores[username][0] += var.session_answervalue
-        var.userscores[username][1] += var.session_answervalue
-    except:
-        print("Failed to find user! Adding new")
-        var.userscores[username] = [var.session_answervalue,
+def trivia_answer(username, cleanmessage, bypass = False):
+    if username in var.trivia_answered_by:
+        return
+    if not bypass:
+        try:
+            var.userscores[username][0] += var.session_answervalue
+            var.userscores[username][1] += var.session_answervalue
+        except:
+            print("Failed to find user! Adding new")
+            var.userscores[username] = [var.session_answervalue,
                                     var.session_answervalue, 0]  # sets up new user
-    dumpscores()  # Save all current scores
+
+    if len(var.trivia_answered_by) != var.trivia_num_answers - 1 and not bypass:
+        var.trivia_answered_by.append(username)
+        print("** " + username + " answered correctly")
+        var.userscores[username][0] += var.trivia_num_answers - len(var.trivia_answered_by)
+        var.userscores[username][1] += var.trivia_num_answers - len(var.trivia_answered_by)
+        return
+    elif not bypass:
+        var.trivia_answered_by.append(username)
+        print("** " + username + " answered correctly")
+    var.trivia_questionasked = False
+    print("calling winners and doing stuff")
+    dumpscores()  # Save all current scores 
+    # TODO Make better
+    print(var.trivia_answered_by)
+    msg = p.join(var.trivia_answered_by)
     if var.session_answervalue == 1:
-        msg = str(username)+" answers question #"+str(var.session_questionno+1)+" correctly! The answer is ** "+str(
-            var.qs.iloc[var.session_questionno, 2])+" ** for "+str(var.session_answervalue)+" point. "+str(username)+" has "+str(var.userscores[username][0])+" points!"
+        msg += " answers question #"+str(var.session_questionno+1)+" correctly! The answer is ** "+str(
+            var.qs.iloc[var.session_questionno, 2])+" ** for "+str(var.session_answervalue)+" point. "
+        print("3::")
     else:
-        msg = str(username)+" answers question #"+str(var.session_questionno+1)+" correctly! The answer is ** "+str(
-            var.qs.iloc[var.session_questionno, 2])+" ** for "+str(var.session_answervalue)+" points. "+str(username)+" has "+str(var.userscores[username][0])+" points!"
+        msg += str(username)+" answers question #"+str(var.session_questionno+1)+" correctly! The answer is ** "+str(
+            var.qs.iloc[var.session_questionno, 2])+" ** for "+str(var.session_answervalue)+" points. "
+        print("4::")
+    print("msg is :" + msg)
     sendmessage(msg)
+    var.trivia_answered_by = []
     time.sleep((var.trivia_questiondelay))
     var.session_questionno += 1
     var.trivia_hintasked = 0
@@ -426,6 +453,9 @@ def trivia_askhint_mode0(hinttype):                 # hinttype: 0 = 1st hint, 1 
 
 
 def trivia_skipquestion():
+    if len(var.trivia_answered_by) > 0:
+        trivia_answer('','',bypass=True)
+        return
     if var.trivia_active:
         var.session_questionno += 1
         var.trivia_hintasked = 0
@@ -648,9 +678,14 @@ def scanloop():
                     if bool(re.match("\\b"+var.qs.iloc[var.session_questionno, 3]+"\\b", message, re.IGNORECASE)):
                         print("Answer recognized.")
                         trivia_answer(username, cleanmessage)
-                except:
+                except Exception as e:
+                    print(e)
+                    traceback.print_exc()
                     pass
-    except:
+    except Exception as e:
+        if not str(e).startswith("["):
+            print(e)
+            traceback.print_exc()
         pass
 
 
