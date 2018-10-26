@@ -46,6 +46,8 @@ class var():
     trivia_bonusvalue = 'INIT'
     trivia_num_answers = 1
     trivia_answered_by = []
+    trivia_wait_for_next = 1
+    trivia_answered_wait = 0
     admins = 'INIT'
 
     # FUNCTION VARIABLES
@@ -63,7 +65,7 @@ class var():
     # Dictionary holding user scores, kept in '!' and loaded/created upon trivia. [1,2,3] 1: Session score 2: Total trivia points 3: Total wins
     userscores = {}
     COMMANDLIST = ["!triviastart", "!triviaend", "!top3", "!hint", "!bonus", "!score", "!next",
-                   "!stop", "!loadconfig", "!backuptrivia", "!loadtrivia", "!creator"]  # All commands
+                   "!stop", "!loadconfig", "!backuptrivia", "!loadtrivia", "!creator", "!ask"]  # All commands
     SWITCH = True                           # Switch to keep bot connection running
     trivia_active = False                   # Switch for when trivia is being played
     # Switch for when a question is actively being asked
@@ -121,7 +123,7 @@ def trivia_start():
     var.trivia_active = True
     print("Trivia has begun! Question Count: "+str(var.trivia_questions) +
           ". Trivia will start in "+str(var.trivia_questiondelay)+" seconds.")
-    time.sleep(var.trivia_questiondelay)
+    # time.sleep(var.trivia_questiondelay) # Removed for making time flow
     trivia_callquestion()
 
 
@@ -153,6 +155,7 @@ def loadconfig():
     var.trivia_bonusvalue = int(config['Trivia Settings']['trivia_bonusvalue'])
     var.trivia_num_answers = int(config['Trivia Settings']['trivia_num_answers'])
 
+    var.trivia_wait_for_next = int(config['Trivia Settings']['trivia_wait_for_next'])
     admin1 = config['Admin Settings']['admins']
     var.admins = admin1.split(',')
 
@@ -198,6 +201,9 @@ def trivia_commandswitch(cleanmessage, username):
             trivia_loadbackup()
         if cleanmessage == "!next":
             trivia_skipquestion()
+        if cleanmessage == "!ask" and var.trivia_answered_wait == 0:
+            trivia_callquestion()
+            var.trivia_answered_wait = 1
 
     # ACTIVE TRIVIA COMMANDS
     if var.trivia_active:
@@ -246,7 +252,7 @@ def trivia_commandswitch(cleanmessage, username):
 def trivia_callquestion():
     var.trivia_questionasked = True
     var.trivia_questionasked_time = round(time.time())
-    msg = "Question "+str(var.session_questionno+1)+": ["+var.qs.iloc[var.session_questionno, 0]+"] " + \
+    msg = "Question "+str(var.session_questionno+1)+": " + \
         var.qs.iloc[var.session_questionno, 1] + " : " + \
         re.sub('[^\W_]', "_", var.qs.iloc[var.session_questionno, 2], re.U) # should be compiled
     var.hint_current = [-1,-1,'']
@@ -284,13 +290,12 @@ def trivia_answer(username, cleanmessage, bypass = False):
     msg = p.join(var.trivia_answered_by)
     if var.session_answervalue == 1:
         msg += " answers question #"+str(var.session_questionno+1)+" correctly! The answer is ** "+str(
-            var.qs.iloc[var.session_questionno, 2])+" ** for "+str(var.session_answervalue)+" point. "
+            var.qs.iloc[var.session_questionno, 2])
         print("3::")
     else:
-        msg += str(username)+" answers question #"+str(var.session_questionno+1)+" correctly! The answer is ** "+str(
-            var.qs.iloc[var.session_questionno, 2])+" ** for "+str(var.session_answervalue)+" points. "
+        msg += " answers question #"+str(var.session_questionno+1)+" correctly! The answer is ** "+str(
+            var.qs.iloc[var.session_questionno, 2])
         print("4::")
-    print("msg is :" + msg)
     sendmessage(msg)
     var.trivia_answered_by = []
     time.sleep((var.trivia_questiondelay))
@@ -302,8 +307,10 @@ def trivia_answer(username, cleanmessage, bypass = False):
     if var.trivia_questions == var.session_questionno:          # End game check
         trivia_end()
     else:
-        print("Next question called...")
-        trivia_callquestion()
+        if var.trivia_wait_for_next == 0:
+            trivia_callquestion()
+        else:
+            var.trivia_answered_wait = 0
 
 
 # Finishes trivia by getting top 3 list, then adjusting final message based on how many participants. Then dumpscore()
@@ -375,6 +382,10 @@ def trivia_routinechecks():                   # after every time loop, routine c
 def trivia_askhint(hinttype=0):
     if len(str(var.qs.iloc[var.session_questionno, 2])) <= 2:
         print("Hint requested, not served")
+        msg = "Question "+str(var.session_questionno+1)+": " + \
+        var.qs.iloc[var.session_questionno, 1] + " : " + \
+        re.sub('[^\W_]', "_", var.qs.iloc[var.session_questionno, 2], re.U) # should be compiled
+        sendmessage(msg)
         return
     if var.trivia_hintmode == 0:
         trivia_askhint_mode0(hinttype)
@@ -385,8 +396,10 @@ def trivia_askhint(hinttype=0):
 def trivia_askhint_mode1(hinttype):                 # hinttype: 0 = 1st hint, 1 = 2nd hint
     # type 0, reveal 1 character, higher chance to reveal vowel, maybe
     if hinttype == 0:
+        msg = "Question "+str(var.session_questionno+1)+": " + \
+        var.qs.iloc[var.session_questionno, 1]
         if var.hint_current[0] == 0:
-            sendmessage("Hint #1: "+var.hint_current[2])
+            sendmessage(msg + " Hint #1: "+var.hint_current[2])
             return
         prehint = str(var.qs.iloc[var.session_questionno, 2])
         # only reveal letters, don't reveal -, _, ', etc
@@ -397,12 +410,14 @@ def trivia_askhint_mode1(hinttype):                 # hinttype: 0 = 1st hint, 1 
         hint = list(re.sub('[^\W_]', "_", var.qs.iloc[var.session_questionno, 2], re.U))
         hint[kept_letter_i] = kept_letter
         var.hint_current = [0,[kept_letter_i],"".join(hint)]
-        sendmessage("Hint #1: "+var.hint_current[2])
+        sendmessage(msg + " Hint #1: "+var.hint_current[2])
     if hinttype == 1:
         # reveal up to 3 more, depending on length
         prehint = str(var.qs.iloc[var.session_questionno, 2])
+        msg = "Question "+str(var.session_questionno+1)+": " + \
+        var.qs.iloc[var.session_questionno, 1]
         if var.hint_current[0] == 1:
-            sendmessage("Hint #2: "+var.hint_current[2])
+            sendmessage(msg + " Hint #2: "+var.hint_current[2])
             print("here1")
             return
         reveal_n = 3
@@ -425,7 +440,7 @@ def trivia_askhint_mode1(hinttype):                 # hinttype: 0 = 1st hint, 1 
         for (i, letter) in zip(kept_letters_i,kept_letters):
             hint[i] = letter
         var.hint_current = [1,[kept_letter_i],"".join(hint)]
-        sendmessage("Hint #2: "+var.hint_current[2])
+        sendmessage(msg + " Hint #2: "+var.hint_current[2])
 
 
 def trivia_askhint_mode0(hinttype):                 # hinttype: 0 = 1st hint, 1 = 2nd hint
@@ -471,7 +486,10 @@ def trivia_skipquestion():
         if var.trivia_questions == var.session_questionno:          # End game check
             trivia_end()
         else:
-            trivia_callquestion()
+            if var.trivia_wait_for_next == 0:
+                trivia_callquestion()
+            else:
+                var.trivia_answered_wait = 0
 
 
 # B O N U S
@@ -538,7 +556,7 @@ def trivia_userscore(username):
 def sendmessage(msg):
     print("Sent: " + msg)
     answermsg = ":"+chatvar.NICK+"!"+chatvar.NICK+"@"+chatvar.NICK + \
-        ".tmi.twitch.tv PRIVMSG "+chatvar.CHAN+" : "+msg+"\r\n"
+        ".tmi.twitch.tv PRIVMSG "+chatvar.CHAN+" :/me "+msg+"\r\n"
     answermsg2 = answermsg.encode("utf-8")
     s.send(answermsg2)
 
